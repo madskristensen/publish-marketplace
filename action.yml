@@ -67,8 +67,7 @@ runs:
             f"/extensions/{ext_enc}?api-version=7.2-preview.2"
         )
 
-        import base64
-        pat = base64.b64encode(f":{token}".encode()).decode()
+        pat = base64.b64encode(f"OAuth:{token}".encode()).decode()
 
         req = urllib.request.Request(url, data=data, method="PUT")
         req.add_header("Authorization", f"Basic {pat}")
