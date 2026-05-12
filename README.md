@@ -2,7 +2,7 @@
 
 A GitHub Action to publish **Visual Studio** (the IDE) extensions (.vsix) to the [Visual Studio Marketplace](https://marketplace.visualstudio.com).
 
-Works on both **Linux** and **Windows** runners. Uses Python 3 — no extra tools or dependencies required. Drop-in replacement for [VsixPublisherAction](https://github.com/cezarypiatek/VsixPublisherAction) using the same input names and secret.
+Requires a **Windows** runner. Uses `VsixPublisher.exe` from the Visual Studio installation (already present on `windows-latest` runners) — no extra tools or dependencies required. Drop-in replacement for [VsixPublisherAction](https://github.com/cezarypiatek/VsixPublisherAction) using the same input names and secret.
 
 ## Usage
 
@@ -30,7 +30,7 @@ Store your PAT as a secret named `VS_PUBLISHER_ACCESS_TOKEN`. The token must hav
 ```yaml
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     needs: build
     steps:
       - uses: actions/checkout@v4
