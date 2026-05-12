@@ -22,7 +22,7 @@ runs:
         MANIFEST_FILE: ${{ inputs.publish-manifest-file }}
         TOKEN: ${{ inputs.personal-access-code }}
       run: |
-        import os, sys, json, zipfile, base64, xml.etree.ElementTree as ET
+        import os, sys, io, re, json, zipfile, base64, xml.etree.ElementTree as ET
         import urllib.request, urllib.error, urllib.parse, time
 
         vsix_file = os.environ["VSIX_FILE"]
@@ -43,21 +43,29 @@ runs:
         publisher = manifest["publisher"]
         extension_id = manifest["identity"]["internalName"]
 
-        # Read version from vsixmanifest for logging; upload VSIX unmodified.
-        # api-version 4.1-preview.2 (matching VsixPublisher.exe) is more lenient
-        # about publisher display name vs account ID mismatches in the manifest.
+        # Rebuild the VSIX patching only Publisher in the vsixmanifest.
+        # The GUID-suffixed Id is left intact — it's the DB key on the server.
+        # 4.1-preview.2 (matching VsixPublisher.exe) matches by internalName in URL.
         ns = {"vs": "http://schemas.microsoft.com/developer/vsx-schema/2011"}
-        with zipfile.ZipFile(vsix_file) as z:
-            vsix_manifests = [n for n in z.namelist() if n.endswith(".vsixmanifest")]
+        buf = io.BytesIO()
+        version = None
+        with zipfile.ZipFile(vsix_file) as z_in:
+            vsix_manifests = [n for n in z_in.namelist() if n.endswith(".vsixmanifest")]
             if not vsix_manifests:
                 print("::error::No .vsixmanifest found in VSIX", file=sys.stderr)
                 sys.exit(1)
-            with z.open(vsix_manifests[0]) as f:
-                root = ET.parse(f).getroot()
-        version = root.find("vs:Metadata/vs:Identity", ns).get("Version")
-
-        with open(vsix_file, "rb") as f:
-            data = f.read()
+            with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as z_out:
+                for item in z_in.infolist():
+                    raw = z_in.read(item.filename)
+                    if item.filename.endswith(".vsixmanifest"):
+                        text = raw.decode("utf-8")
+                        root = ET.fromstring(text)
+                        version = root.find("vs:Metadata/vs:Identity", ns).get("Version")
+                        # Patch only Publisher — leave Id (GUID-suffixed) intact
+                        text = re.sub(r'(?<=\bPublisher=")[^"]*(?=")', publisher, text)
+                        raw = text.encode("utf-8")
+                    z_out.writestr(item, raw, compress_type=item.compress_type)
+        data = buf.getvalue()
 
         print(f"Publishing {publisher}.{extension_id} v{version}...")
 
