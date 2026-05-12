@@ -22,8 +22,8 @@ runs:
         MANIFEST_FILE: ${{ inputs.publish-manifest-file }}
         TOKEN: ${{ inputs.personal-access-code }}
       run: |
-        import os, sys, io, re, json, zipfile, base64, xml.etree.ElementTree as ET
-        import urllib.request, urllib.error, urllib.parse
+        import os, sys, io, re, json, zipfile, zlib, base64, xml.etree.ElementTree as ET
+        import urllib.request, urllib.error, urllib.parse, time
 
         vsix_file = os.environ["VSIX_FILE"]
         manifest_file = os.environ["MANIFEST_FILE"]
@@ -45,6 +45,8 @@ runs:
 
         # Read the VSIX, patch Publisher and Id in the vsixmanifest so they
         # match the marketplace publisher account ID and internalName exactly.
+        # Open output with ZIP_STORED so we can preserve each entry's original
+        # compress_type by passing it explicitly — avoiding accidental recompression.
         ns = {"vs": "http://schemas.microsoft.com/developer/vsx-schema/2011"}
         buf = io.BytesIO()
         version = None
@@ -53,7 +55,7 @@ runs:
             if not vsix_manifests:
                 print("::error::No .vsixmanifest found in VSIX", file=sys.stderr)
                 sys.exit(1)
-            with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z_out:
+            with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as z_out:
                 for item in z_in.infolist():
                     raw = z_in.read(item.filename)
                     if item.filename.endswith(".vsixmanifest"):
@@ -64,7 +66,8 @@ runs:
                         text = re.sub(r'(?<=\bPublisher=")[^"]*(?=")', publisher, text)
                         text = re.sub(r'(?<=\bId=")[^"]*(?=")', extension_id, text)
                         raw = text.encode("utf-8")
-                    z_out.writestr(item, raw)
+                    # Preserve original compression type for every entry
+                    z_out.writestr(item, raw, compress_type=item.compress_type)
         data = buf.getvalue()
 
         print(f"Publishing {publisher}.{extension_id} v{version}...")
@@ -89,20 +92,25 @@ runs:
             req.add_header("Content-Length", str(len(data)))
             return req
 
-        try:
-            with urllib.request.urlopen(make_req(update_url, "PUT")) as resp:
-                print(f"Updated {publisher}.{extension_id} v{version} successfully")
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                # Extension doesn't exist yet — create it
+        def send(url, method, label):
+            for attempt in range(1, 4):
                 try:
-                    with urllib.request.urlopen(make_req(create_url, "POST")) as resp:
-                        print(f"Created {publisher}.{extension_id} v{version} successfully")
-                except urllib.error.HTTPError as e2:
-                    body = e2.read().decode("utf-8", errors="replace")
-                    print(f"::error::Publish failed ({e2.code} {e2.reason}): {body}", file=sys.stderr)
-                    sys.exit(1)
-            else:
-                body = e.read().decode("utf-8", errors="replace")
-                print(f"::error::Publish failed ({e.code} {e.reason}): {body}", file=sys.stderr)
+                    with urllib.request.urlopen(make_req(url, method)) as resp:
+                        print(f"{label} {publisher}.{extension_id} v{version} successfully")
+                        return None  # success
+                except urllib.error.HTTPError as e:
+                    if e.code >= 500 and attempt < 3:
+                        print(f"Server error ({e.code}), retrying in 5s... ({attempt}/3)")
+                        time.sleep(5)
+                        continue
+                    return e  # fatal or non-retryable
+            return e
+
+        err = send(update_url, "PUT", "Updated")
+        if err is not None:
+            if err.code == 404:
+                err = send(create_url, "POST", "Created")
+            if err is not None:
+                body = err.read().decode("utf-8", errors="replace")
+                print(f"::error::Publish failed ({err.code} {err.reason}): {body}", file=sys.stderr)
                 sys.exit(1)
