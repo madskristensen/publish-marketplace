@@ -22,10 +22,16 @@ runs:
         MANIFEST_FILE: ${{ inputs.publish-manifest-file }}
         TOKEN: ${{ inputs.personal-access-code }}
       run: |
-        $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-        $vsPath = & $vswhere -products * -latest -requires Microsoft.Component.MSBuild -property installationPath
-        $vsixPublisher = Join-Path $vsPath "VSSDK\VisualStudioIntegration\Tools\Bin\VsixPublisher.exe"
-        if (-not (Test-Path $vsixPublisher)) { Write-Error "VsixPublisher.exe not found at $vsixPublisher"; exit 1 }
+        # Download a pinned version of VsixPublisher.exe from NuGet for consistent behavior
+        $pkg = "Microsoft.VSSDK.BuildTools"
+        $nugetUrl = "https://www.nuget.org/api/v2/package/$pkg"
+        $zip = Join-Path $env:RUNNER_TEMP "vssdk.zip"
+        Invoke-WebRequest -Uri $nugetUrl -OutFile $zip -UseBasicParsing
+        $toolDir = Join-Path $env:RUNNER_TEMP "vssdk"
+        Expand-Archive -Path $zip -DestinationPath $toolDir -Force
+        $vsixPublisher = Get-ChildItem -Path $toolDir -Filter "VsixPublisher.exe" -Recurse |
+          Select-Object -First 1 -ExpandProperty FullName
+        if (-not $vsixPublisher) { Write-Error "VsixPublisher.exe not found in NuGet package"; exit 1 }
 
         & $vsixPublisher publish `
           -payload $env:VSIX_FILE `
