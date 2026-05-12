@@ -22,7 +22,7 @@ runs:
         MANIFEST_FILE: ${{ inputs.publish-manifest-file }}
         TOKEN: ${{ inputs.personal-access-code }}
       run: |
-        import os, sys, json, zipfile, base64, xml.etree.ElementTree as ET
+        import os, sys, io, re, json, zipfile, base64, xml.etree.ElementTree as ET
         import urllib.request, urllib.error, urllib.parse
 
         vsix_file = os.environ["VSIX_FILE"]
@@ -43,22 +43,31 @@ runs:
         publisher = manifest["publisher"]
         extension_id = manifest["identity"]["internalName"]
 
-        # Version is embedded in the VSIX — read it just for the log message
-        with zipfile.ZipFile(vsix_file) as z:
-            vsix_manifests = [n for n in z.namelist() if n.endswith(".vsixmanifest")]
+        # Read the VSIX, patch the Publisher in the vsixmanifest to match the
+        # marketplace publisher ID, and build the upload payload in memory.
+        ns = {"vs": "http://schemas.microsoft.com/developer/vsx-schema/2011"}
+        buf = io.BytesIO()
+        version = None
+        with zipfile.ZipFile(vsix_file) as z_in:
+            vsix_manifests = [n for n in z_in.namelist() if n.endswith(".vsixmanifest")]
             if not vsix_manifests:
                 print("::error::No .vsixmanifest found in VSIX", file=sys.stderr)
                 sys.exit(1)
-            with z.open(vsix_manifests[0]) as f:
-                root = ET.parse(f).getroot()
-
-        ns = {"vs": "http://schemas.microsoft.com/developer/vsx-schema/2011"}
-        version = root.find("vs:Metadata/vs:Identity", ns).get("Version")
+            with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z_out:
+                for item in z_in.infolist():
+                    raw = z_in.read(item.name)
+                    if item.name.endswith(".vsixmanifest"):
+                        text = raw.decode("utf-8")
+                        # Extract version for logging
+                        root = ET.fromstring(text)
+                        version = root.find("vs:Metadata/vs:Identity", ns).get("Version")
+                        # Patch Publisher attribute to use the marketplace publisher ID
+                        text = re.sub(r'(?<=\bPublisher=")[^"]*(?=")', publisher, text)
+                        raw = text.encode("utf-8")
+                    z_out.writestr(item, raw)
+        data = buf.getvalue()
 
         print(f"Publishing {publisher}.{extension_id} v{version}...")
-
-        with open(vsix_file, "rb") as f:
-            data = f.read()
 
         pub_enc = urllib.parse.quote(publisher, safe="")
         ext_enc = urllib.parse.quote(extension_id, safe="")
