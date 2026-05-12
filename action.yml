@@ -1,6 +1,10 @@
 name: "Publish to VS Marketplace"
 description: "Publish a Visual Studio IDE extension (.vsix) to the Visual Studio Marketplace"
 
+branding:
+  icon: 'arrow-up-circle'
+  color: 'purple'
+
 inputs:
   extension-file:
     description: "Path to the .vsix file to publish"
