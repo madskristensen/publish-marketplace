@@ -43,7 +43,7 @@ runs:
         publisher = manifest["publisher"]
         extension_id = manifest["identity"]["internalName"]
 
-        # Version comes from the VSIX manifest
+        # Version is embedded in the VSIX — read it just for the log message
         with zipfile.ZipFile(vsix_file) as z:
             vsix_manifests = [n for n in z.namelist() if n.endswith(".vsixmanifest")]
             if not vsix_manifests:
@@ -64,7 +64,7 @@ runs:
         ext_enc = urllib.parse.quote(extension_id, safe="")
         url = (
             f"https://marketplace.visualstudio.com/_apis/gallery/publishers/{pub_enc}"
-            f"/extensions/{ext_enc}/{version}/vspackage?api-version=3.0-preview.1"
+            f"/extensions/{ext_enc}?api-version=7.2-preview.2"
         )
 
         req = urllib.request.Request(url, data=data, method="PUT")
