@@ -22,7 +22,7 @@ runs:
         MANIFEST_FILE: ${{ inputs.publish-manifest-file }}
         TOKEN: ${{ inputs.personal-access-code }}
       run: |
-        import os, sys, io, re, json, zipfile, zlib, base64, xml.etree.ElementTree as ET
+        import os, sys, json, zipfile, base64, xml.etree.ElementTree as ET
         import urllib.request, urllib.error, urllib.parse, time
 
         vsix_file = os.environ["VSIX_FILE"]
@@ -37,38 +37,27 @@ runs:
             print(f"::error::Manifest file not found: {manifest_file}", file=sys.stderr)
             sys.exit(1)
 
-        # Publisher and internalName come from vs-publish.json
+        # Read publisher/internalName from vs-publish.json for the URL
         with open(manifest_file) as f:
             manifest = json.load(f)
         publisher = manifest["publisher"]
         extension_id = manifest["identity"]["internalName"]
 
-        # Read the VSIX, patch Publisher and Id in the vsixmanifest so they
-        # match the marketplace publisher account ID and internalName exactly.
-        # Open output with ZIP_STORED so we can preserve each entry's original
-        # compress_type by passing it explicitly — avoiding accidental recompression.
+        # Read version from vsixmanifest for logging; upload VSIX unmodified.
+        # api-version 4.1-preview.2 (matching VsixPublisher.exe) is more lenient
+        # about publisher display name vs account ID mismatches in the manifest.
         ns = {"vs": "http://schemas.microsoft.com/developer/vsx-schema/2011"}
-        buf = io.BytesIO()
-        version = None
-        with zipfile.ZipFile(vsix_file) as z_in:
-            vsix_manifests = [n for n in z_in.namelist() if n.endswith(".vsixmanifest")]
+        with zipfile.ZipFile(vsix_file) as z:
+            vsix_manifests = [n for n in z.namelist() if n.endswith(".vsixmanifest")]
             if not vsix_manifests:
                 print("::error::No .vsixmanifest found in VSIX", file=sys.stderr)
                 sys.exit(1)
-            with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as z_out:
-                for item in z_in.infolist():
-                    raw = z_in.read(item.filename)
-                    if item.filename.endswith(".vsixmanifest"):
-                        text = raw.decode("utf-8")
-                        root = ET.fromstring(text)
-                        identity = root.find("vs:Metadata/vs:Identity", ns)
-                        version = identity.get("Version")
-                        text = re.sub(r'(?<=\bPublisher=")[^"]*(?=")', publisher, text)
-                        text = re.sub(r'(?<=\bId=")[^"]*(?=")', extension_id, text)
-                        raw = text.encode("utf-8")
-                    # Preserve original compression type for every entry
-                    z_out.writestr(item, raw, compress_type=item.compress_type)
-        data = buf.getvalue()
+            with z.open(vsix_manifests[0]) as f:
+                root = ET.parse(f).getroot()
+        version = root.find("vs:Metadata/vs:Identity", ns).get("Version")
+
+        with open(vsix_file, "rb") as f:
+            data = f.read()
 
         print(f"Publishing {publisher}.{extension_id} v{version}...")
 
