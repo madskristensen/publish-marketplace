@@ -55,8 +55,8 @@ runs:
                 sys.exit(1)
             with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z_out:
                 for item in z_in.infolist():
-                    raw = z_in.read(item.name)
-                    if item.name.endswith(".vsixmanifest"):
+                    raw = z_in.read(item.filename)
+                    if item.filename.endswith(".vsixmanifest"):
                         text = raw.decode("utf-8")
                         # Extract version for logging
                         root = ET.fromstring(text)
