@@ -61,8 +61,9 @@ runs:
                         # Extract version for logging
                         root = ET.fromstring(text)
                         version = root.find("vs:Metadata/vs:Identity", ns).get("Version")
-                        # Patch Publisher attribute to use the marketplace publisher ID
+                        # Patch Publisher and Id to match marketplace IDs
                         text = re.sub(r'(?<=\bPublisher=")[^"]*(?=")', publisher, text)
+                        text = re.sub(r'(?<=\bId=")[^"]*(?=")', extension_id, text)
                         raw = text.encode("utf-8")
                     z_out.writestr(item, raw)
         data = buf.getvalue()
