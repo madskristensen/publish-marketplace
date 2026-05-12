@@ -6,8 +6,8 @@ inputs:
     description: "Path to the .vsix file to publish"
     required: true
   publish-manifest-file:
-    description: "Path to the publishManifest.json file (accepted for compatibility, not currently used)"
-    required: false
+    description: "Path to the publishManifest.json file"
+    required: true
   personal-access-code:
     description: "Personal Access Token with Marketplace (Acquire + Manage) permission"
     required: true
@@ -19,40 +19,52 @@ runs:
       shell: python3 {0}
       env:
         VSIX_FILE: ${{ inputs.extension-file }}
+        MANIFEST_FILE: ${{ inputs.publish-manifest-file }}
         TOKEN: ${{ inputs.personal-access-code }}
       run: |
-        import os, sys, zipfile, xml.etree.ElementTree as ET
-        import urllib.request, urllib.error
+        import os, sys, json, zipfile, xml.etree.ElementTree as ET
+        import urllib.request, urllib.error, urllib.parse
 
         vsix_file = os.environ["VSIX_FILE"]
+        manifest_file = os.environ["MANIFEST_FILE"]
         token = os.environ["TOKEN"]
 
         if not os.path.isfile(vsix_file):
             print(f"::error::VSIX file not found: {vsix_file}", file=sys.stderr)
             sys.exit(1)
 
+        if not os.path.isfile(manifest_file):
+            print(f"::error::Manifest file not found: {manifest_file}", file=sys.stderr)
+            sys.exit(1)
+
+        # Publisher and extension name come from the publish manifest
+        with open(manifest_file) as f:
+            manifest = json.load(f)
+        publisher = manifest["publisher"]
+        extension_id = manifest["identity"]["internalName"]
+
+        # Version comes from the VSIX manifest
         with zipfile.ZipFile(vsix_file) as z:
-            manifests = [n for n in z.namelist() if n.endswith(".vsixmanifest")]
-            if not manifests:
+            vsix_manifests = [n for n in z.namelist() if n.endswith(".vsixmanifest")]
+            if not vsix_manifests:
                 print("::error::No .vsixmanifest found in VSIX", file=sys.stderr)
                 sys.exit(1)
-            with z.open(manifests[0]) as f:
+            with z.open(vsix_manifests[0]) as f:
                 root = ET.parse(f).getroot()
 
         ns = {"vs": "http://schemas.microsoft.com/developer/vsx-schema/2011"}
-        identity = root.find("vs:Metadata/vs:Identity", ns)
-        publisher = identity.get("Publisher")
-        extension_id = identity.get("Id")
-        version = identity.get("Version")
+        version = root.find("vs:Metadata/vs:Identity", ns).get("Version")
 
         print(f"Publishing {publisher}.{extension_id} v{version}...")
 
         with open(vsix_file, "rb") as f:
             data = f.read()
 
+        pub_enc = urllib.parse.quote(publisher, safe="")
+        ext_enc = urllib.parse.quote(extension_id, safe="")
         url = (
-            f"https://marketplace.visualstudio.com/_apis/gallery/publishers/{publisher}"
-            f"/extensions/{extension_id}/{version}/vspackage?api-version=3.0-preview.1"
+            f"https://marketplace.visualstudio.com/_apis/gallery/publishers/{pub_enc}"
+            f"/extensions/{ext_enc}/{version}/vspackage?api-version=3.0-preview.1"
         )
 
         req = urllib.request.Request(url, data=data, method="PUT")
