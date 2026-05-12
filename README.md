@@ -8,7 +8,7 @@ Requires a **Windows** runner. Uses `VsixPublisher.exe` from the Visual Studio i
 
 ```yaml
 - name: Publish to VS Marketplace
-  uses: madskristensen/publish-marketplace@v1
+  uses: madskristensen/publish-marketplace@v2
   with:
     extension-file: MyExtension.vsix
     publish-manifest-file: vs-publish.json
