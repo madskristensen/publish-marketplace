@@ -71,22 +71,35 @@ runs:
 
         pub_enc = urllib.parse.quote(publisher, safe="")
         ext_enc = urllib.parse.quote(extension_id, safe="")
-        url = (
+        update_url = (
             f"https://marketplace.visualstudio.com/_apis/gallery/publishers/{pub_enc}"
             f"/extensions/{ext_enc}?api-version=7.2-preview.2"
         )
+        create_url = "https://marketplace.visualstudio.com/_apis/gallery/extensions?api-version=7.2-preview.2"
 
         pat = base64.b64encode(f"OAuth:{token}".encode()).decode()
 
-        req = urllib.request.Request(url, data=data, method="PUT")
-        req.add_header("Authorization", f"Basic {pat}")
-        req.add_header("Content-Type", "application/octet-stream")
-        req.add_header("Content-Length", str(len(data)))
+        def make_req(url, method):
+            req = urllib.request.Request(url, data=data, method=method)
+            req.add_header("Authorization", f"Basic {pat}")
+            req.add_header("Content-Type", "application/octet-stream")
+            req.add_header("Content-Length", str(len(data)))
+            return req
 
         try:
-            with urllib.request.urlopen(req) as resp:
-                print(f"Published {publisher}.{extension_id} v{version} successfully")
+            with urllib.request.urlopen(make_req(update_url, "PUT")) as resp:
+                print(f"Updated {publisher}.{extension_id} v{version} successfully")
         except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", errors="replace")
-            print(f"::error::Publish failed ({e.code} {e.reason}): {body}", file=sys.stderr)
-            sys.exit(1)
+            if e.code == 404:
+                # Extension doesn't exist yet — create it
+                try:
+                    with urllib.request.urlopen(make_req(create_url, "POST")) as resp:
+                        print(f"Created {publisher}.{extension_id} v{version} successfully")
+                except urllib.error.HTTPError as e2:
+                    body = e2.read().decode("utf-8", errors="replace")
+                    print(f"::error::Publish failed ({e2.code} {e2.reason}): {body}", file=sys.stderr)
+                    sys.exit(1)
+            else:
+                body = e.read().decode("utf-8", errors="replace")
+                print(f"::error::Publish failed ({e.code} {e.reason}): {body}", file=sys.stderr)
+                sys.exit(1)
