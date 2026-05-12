@@ -73,9 +73,12 @@ runs:
         ext_enc = urllib.parse.quote(extension_id, safe="")
         update_url = (
             f"https://marketplace.visualstudio.com/_apis/gallery/publishers/{pub_enc}"
-            f"/extensions/{ext_enc}?api-version=7.2-preview.2"
+            f"/extensions/{ext_enc}?api-version=4.1-preview.2"
         )
-        create_url = "https://marketplace.visualstudio.com/_apis/gallery/extensions?api-version=7.2-preview.2"
+        create_url = (
+            f"https://marketplace.visualstudio.com/_apis/gallery/publishers/{pub_enc}"
+            f"/extensions/?api-version=4.1-preview.2"
+        )
 
         pat = base64.b64encode(f"OAuth:{token}".encode()).decode()
 
