@@ -22,7 +22,7 @@ runs:
         MANIFEST_FILE: ${{ inputs.publish-manifest-file }}
         TOKEN: ${{ inputs.personal-access-code }}
       run: |
-        import os, sys, json, zipfile, xml.etree.ElementTree as ET
+        import os, sys, json, zipfile, base64, xml.etree.ElementTree as ET
         import urllib.request, urllib.error, urllib.parse
 
         vsix_file = os.environ["VSIX_FILE"]
@@ -67,8 +67,11 @@ runs:
             f"/extensions/{ext_enc}?api-version=7.2-preview.2"
         )
 
+        import base64
+        pat = base64.b64encode(f":{token}".encode()).decode()
+
         req = urllib.request.Request(url, data=data, method="PUT")
-        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Authorization", f"Basic {pat}")
         req.add_header("Content-Type", "application/octet-stream")
         req.add_header("Content-Length", str(len(data)))
 
