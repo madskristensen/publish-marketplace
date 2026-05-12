@@ -37,18 +37,17 @@ runs:
             print(f"::error::Manifest file not found: {manifest_file}", file=sys.stderr)
             sys.exit(1)
 
-        # Publisher comes from vs-publish.json; extension_id is read from the
-        # vsixmanifest Identity Id so the URL matches the VSIX contents exactly.
+        # Publisher and internalName come from vs-publish.json
         with open(manifest_file) as f:
             manifest = json.load(f)
         publisher = manifest["publisher"]
+        extension_id = manifest["identity"]["internalName"]
 
-        # Read the VSIX, patch only the Publisher in the vsixmanifest, and
-        # capture the real Id and Version for logging/URL.
+        # Read the VSIX, patch Publisher and Id in the vsixmanifest so they
+        # match the marketplace publisher account ID and internalName exactly.
         ns = {"vs": "http://schemas.microsoft.com/developer/vsx-schema/2011"}
         buf = io.BytesIO()
         version = None
-        extension_id = None
         with zipfile.ZipFile(vsix_file) as z_in:
             vsix_manifests = [n for n in z_in.namelist() if n.endswith(".vsixmanifest")]
             if not vsix_manifests:
@@ -62,9 +61,8 @@ runs:
                         root = ET.fromstring(text)
                         identity = root.find("vs:Metadata/vs:Identity", ns)
                         version = identity.get("Version")
-                        extension_id = identity.get("Id")
-                        # Patch only Publisher to match the marketplace account ID
                         text = re.sub(r'(?<=\bPublisher=")[^"]*(?=")', publisher, text)
+                        text = re.sub(r'(?<=\bId=")[^"]*(?=")', extension_id, text)
                         raw = text.encode("utf-8")
                     z_out.writestr(item, raw)
         data = buf.getvalue()
