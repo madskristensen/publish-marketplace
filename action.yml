@@ -71,12 +71,27 @@ runs:
           exit 1
         }
 
-        # Parse extension.vsixmanifest before publishing so we can show a
-        # useful summary card even if the publish itself fails.
-        $extId = $null
+        # Resolve the Marketplace itemName from publishManifest.json. The
+        # publisher ID and the extension's internal name are what compose
+        # the Marketplace URL ({publisher}.{internalName}). The vsixmanifest
+        # Publisher attribute is a *display name* (e.g. "Mads Kristensen")
+        # and its Identity Id may include a GUID suffix on newer extensions
+        # -- neither belongs in the URL.
         $publisher = $null
+        $internalName = $null
         $version = $null
         $displayName = $null
+        try {
+          $manifestJson = Get-Content -LiteralPath $manifestFull -Raw | ConvertFrom-Json
+          $publisher = $manifestJson.publisher
+          if ($manifestJson.identity) { $internalName = $manifestJson.identity.internalName }
+        } catch {
+          Write-Host "::warning::Could not parse publishManifest.json: $($_.Exception.Message)"
+        }
+
+        # Pull display name and version from the VSIX (and use the manifest
+        # Id as a fallback for internalName when the publish manifest omits
+        # it -- VsixPublisher itself falls back the same way).
         try {
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $archive = [System.IO.Compression.ZipFile]::OpenRead($vsixFull)
@@ -86,11 +101,10 @@ runs:
               $reader = New-Object System.IO.StreamReader($entry.Open())
               try { $manifestXml = [xml]$reader.ReadToEnd() } finally { $reader.Dispose() }
               $identity = $manifestXml.PackageManifest.Metadata.Identity
-              $extId = $identity.Id
-              $publisher = $identity.Publisher
               $version = $identity.Version
               $displayName = $manifestXml.PackageManifest.Metadata.DisplayName
               if ($displayName -is [System.Xml.XmlElement]) { $displayName = $displayName.InnerText }
+              if (-not $internalName) { $internalName = $identity.Id }
             }
           } finally { $archive.Dispose() }
         } catch {
@@ -113,8 +127,8 @@ runs:
         # Build a step summary with a link to the listing. Best-effort: a
         # summary failure must never fail the step.
         try {
-          if ($env:GITHUB_STEP_SUMMARY -and $extId -and $publisher) {
-            $itemName = "$publisher.$extId"
+          if ($env:GITHUB_STEP_SUMMARY -and $publisher -and $internalName) {
+            $itemName = "$publisher.$internalName"
             $marketplaceUrl = "https://marketplace.visualstudio.com/items?itemName=$itemName"
             $heading = if ($displayName) { $displayName } else { $itemName }
 
