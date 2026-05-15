@@ -26,20 +26,119 @@ runs:
         MANIFEST_FILE: ${{ inputs.publish-manifest-file }}
         TOKEN: ${{ inputs.personal-access-code }}
       run: |
-        # Download a pinned version of VsixPublisher.exe from NuGet for consistent behavior
-        $pkg = "Microsoft.VSSDK.BuildTools"
-        $nugetUrl = "https://www.nuget.org/api/v2/package/$pkg"
+        $ErrorActionPreference = 'Stop'
+
+        # Defensive masking: if the caller accidentally passed a literal value
+        # instead of a secret, this still keeps the token out of the logs.
+        if ($env:TOKEN) { Write-Host "::add-mask::$env:TOKEN" }
+
+        # Validate inputs up front so users get a clear error instead of a
+        # cryptic VsixPublisher.exe failure 100 lines deep.
+        if (-not (Test-Path -LiteralPath $env:VSIX_FILE -PathType Leaf)) {
+          Write-Host "::error::extension-file not found: $env:VSIX_FILE"
+          exit 1
+        }
+        if (-not (Test-Path -LiteralPath $env:MANIFEST_FILE -PathType Leaf)) {
+          Write-Host "::error::publish-manifest-file not found: $env:MANIFEST_FILE"
+          exit 1
+        }
+
+        $vsixFull = (Resolve-Path -LiteralPath $env:VSIX_FILE).Path
+        $manifestFull = (Resolve-Path -LiteralPath $env:MANIFEST_FILE).Path
+
+        # Always grab the latest Microsoft.VSSDK.BuildTools from NuGet. This
+        # keeps VsixPublisher.exe current with whatever Marketplace expects;
+        # callers who need reproducibility should pin this action via a SHA.
+        Write-Host "::group::Download VsixPublisher.exe (latest Microsoft.VSSDK.BuildTools)"
+        $nugetUrl = "https://www.nuget.org/api/v2/package/Microsoft.VSSDK.BuildTools"
         $zip = Join-Path $env:RUNNER_TEMP "vssdk.zip"
-        Invoke-WebRequest -Uri $nugetUrl -OutFile $zip -UseBasicParsing
         $toolDir = Join-Path $env:RUNNER_TEMP "vssdk"
-        Expand-Archive -Path $zip -DestinationPath $toolDir -Force
+        try {
+          Invoke-WebRequest -Uri $nugetUrl -OutFile $zip -UseBasicParsing
+          if (Test-Path -LiteralPath $toolDir) { Remove-Item -LiteralPath $toolDir -Recurse -Force }
+          Expand-Archive -Path $zip -DestinationPath $toolDir -Force
+        }
+        catch {
+          Write-Host "::endgroup::"
+          Write-Host "::error::Failed to download Microsoft.VSSDK.BuildTools: $($_.Exception.Message)"
+          exit 1
+        }
         $vsixPublisher = Get-ChildItem -Path $toolDir -Filter "VsixPublisher.exe" -Recurse |
           Select-Object -First 1 -ExpandProperty FullName
-        if (-not $vsixPublisher) { Write-Error "VsixPublisher.exe not found in NuGet package"; exit 1 }
+        Write-Host "::endgroup::"
+        if (-not $vsixPublisher) {
+          Write-Host "::error::VsixPublisher.exe not found in Microsoft.VSSDK.BuildTools package"
+          exit 1
+        }
 
+        # Parse extension.vsixmanifest before publishing so we can show a
+        # useful summary card even if the publish itself fails.
+        $extId = $null
+        $publisher = $null
+        $version = $null
+        $displayName = $null
+        try {
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($vsixFull)
+          try {
+            $entry = $archive.Entries | Where-Object { $_.FullName -eq 'extension.vsixmanifest' } | Select-Object -First 1
+            if ($entry) {
+              $reader = New-Object System.IO.StreamReader($entry.Open())
+              try { $manifestXml = [xml]$reader.ReadToEnd() } finally { $reader.Dispose() }
+              $identity = $manifestXml.PackageManifest.Metadata.Identity
+              $extId = $identity.Id
+              $publisher = $identity.Publisher
+              $version = $identity.Version
+              $displayName = $manifestXml.PackageManifest.Metadata.DisplayName
+              if ($displayName -is [System.Xml.XmlElement]) { $displayName = $displayName.InnerText }
+            }
+          } finally { $archive.Dispose() }
+        } catch {
+          Write-Host "::warning::Could not parse extension.vsixmanifest from VSIX: $($_.Exception.Message)"
+        }
+
+        Write-Host "::group::VsixPublisher publish"
         & $vsixPublisher publish `
-          -payload $env:VSIX_FILE `
-          -publishManifest $env:MANIFEST_FILE `
+          -payload $vsixFull `
+          -publishManifest $manifestFull `
           -personalAccessToken $env:TOKEN
+        $publishExit = $LASTEXITCODE
+        Write-Host "::endgroup::"
 
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        if ($publishExit -ne 0) {
+          Write-Host "::error::VsixPublisher.exe exited with code $publishExit"
+          exit $publishExit
+        }
+
+        # Build a step summary with a link to the listing. Best-effort: a
+        # summary failure must never fail the step.
+        try {
+          if ($env:GITHUB_STEP_SUMMARY -and $extId -and $publisher) {
+            $itemName = "$publisher.$extId"
+            $marketplaceUrl = "https://marketplace.visualstudio.com/items?itemName=$itemName"
+            $heading = if ($displayName) { $displayName } else { $itemName }
+
+            $sb = [System.Text.StringBuilder]::new()
+            [void]$sb.AppendLine("# Published to Visual Studio Marketplace")
+            [void]$sb.AppendLine()
+            [void]$sb.AppendLine("**$heading**$(if ($version) { " " + $version })")
+            [void]$sb.AppendLine()
+            [void]$sb.AppendLine("[View on Marketplace]($marketplaceUrl)")
+            [void]$sb.AppendLine()
+            [void]$sb.AppendLine("<details><summary>Expand for details</summary>")
+            [void]$sb.AppendLine()
+            [void]$sb.AppendLine("- **Item name:** ``$itemName``")
+            if ($version) { [void]$sb.AppendLine("- **Version:** ``$version``") }
+            [void]$sb.AppendLine("- **Marketplace URL:** $marketplaceUrl")
+            [void]$sb.AppendLine()
+            [void]$sb.AppendLine("</details>")
+
+            [System.IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, $sb.ToString(), [System.Text.UTF8Encoding]::new($false))
+
+            Write-Host ""
+            Write-Host "Published $heading$(if ($version) { ' ' + $version })"
+            Write-Host "  Marketplace: $marketplaceUrl"
+          }
+        } catch {
+          Write-Host "::warning::Failed to write step summary: $($_.Exception.Message)"
+        }

@@ -2,7 +2,9 @@
 
 A GitHub Action to publish **Visual Studio** (the IDE) extensions (.vsix) to the [Visual Studio Marketplace](https://marketplace.visualstudio.com).
 
-Requires a **Windows** runner. Uses `VsixPublisher.exe` from the Visual Studio installation (already present on `windows-latest` runners) — no extra tools or dependencies required. Drop-in replacement for [VsixPublisherAction](https://github.com/cezarypiatek/VsixPublisherAction) using the same input names and secret.
+Requires a **Windows** runner. The action downloads the latest `Microsoft.VSSDK.BuildTools` package from NuGet on every run to get a current `VsixPublisher.exe` — no Visual Studio installation required on the runner. Drop-in replacement for [VsixPublisherAction](https://github.com/cezarypiatek/VsixPublisherAction) using the same input names and secret.
+
+On a successful publish the action writes a summary card to the workflow run with the extension name, version, and a link to the Marketplace listing.
 
 ## Usage
 
