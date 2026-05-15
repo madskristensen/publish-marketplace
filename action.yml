@@ -133,7 +133,7 @@ runs:
             $heading = if ($displayName) { $displayName } else { $itemName }
 
             $sb = [System.Text.StringBuilder]::new()
-            [void]$sb.AppendLine("# Published to Visual Studio Marketplace")
+            [void]$sb.AppendLine("## Published to Visual Studio Marketplace")
             [void]$sb.AppendLine()
             [void]$sb.AppendLine("**$heading**$(if ($version) { " " + $version })")
             [void]$sb.AppendLine()
