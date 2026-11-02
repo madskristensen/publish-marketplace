@@ -16,8 +16,9 @@ inputs:
     description: "Personal Access Token with Marketplace (Acquire + Manage) permission"
     required: false
   oidc:
-    description: "Use OIDC token for trusted publishing (alternative to personal-access-code)"
+    description: "Use GitHub OIDC trusted publishing; requires job permission id-token: write"
     required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -48,7 +49,7 @@ runs:
         }
 
         # Validate that either a PAT or OIDC is provided
-        $useOidc = ($env:USE_OIDC -eq 'true' -or $env:USE_OIDC -eq 'True')
+        $useOidc = ($env:USE_OIDC -eq 'true')
         if (-not $env:TOKEN -and -not $useOidc) {
           Write-Host "::error::Either personal-access-code or oidc must be provided"
           exit 1
@@ -57,13 +58,17 @@ runs:
           Write-Host "::error::Cannot use both personal-access-code and oidc. Use one or the other."
           exit 1
         }
+        if ($useOidc -and (-not $env:ACTIONS_ID_TOKEN_REQUEST_URL -or -not $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN)) {
+          Write-Host "::error::OIDC requires GitHub Actions with permissions: id-token: write on the publishing job."
+          exit 1
+        }
 
         $vsixFull = (Resolve-Path -LiteralPath $env:VSIX_FILE).Path
         $manifestFull = (Resolve-Path -LiteralPath $env:MANIFEST_FILE).Path
 
         # Always grab the latest Microsoft.VSSDK.BuildTools from NuGet. This
-        # keeps VsixPublisher.exe current with whatever Marketplace expects;
-        # callers who need reproducibility should pin this action via a SHA.
+        # keeps VsixPublisher.exe current with whatever Marketplace expects.
+        # Pinning the action does not pin the downloaded tool version.
         Write-Host "::group::Download VsixPublisher.exe (latest Microsoft.VSSDK.BuildTools)"
         $nugetUrl = "https://www.nuget.org/api/v2/package/Microsoft.VSSDK.BuildTools"
         $zip = Join-Path $env:RUNNER_TEMP "vssdk.zip"
@@ -84,6 +89,13 @@ runs:
         if (-not $vsixPublisher) {
           Write-Host "::error::VsixPublisher.exe not found in Microsoft.VSSDK.BuildTools package"
           exit 1
+        }
+        if ($useOidc) {
+          $publisherHelp = (& $vsixPublisher publish -help 2>&1 | Out-String)
+          if ($publisherHelp -notmatch '(?m)^\s+-oidc\s') {
+            Write-Host "::error::The downloaded VsixPublisher.exe does not support OIDC. Microsoft.VSSDK.BuildTools 18.12.465 or another OIDC-capable version must be available on nuget.org. Retry after it is published, or use personal-access-code without oidc."
+            exit 1
+          }
         }
 
         # Resolve the Marketplace itemName from publishManifest.json. The
@@ -132,13 +144,12 @@ runs:
           "-payload", $vsixFull,
           "-publishManifest", $manifestFull
         )
-        
         if ($useOidc) {
           $publishArgs += "-oidc"
         } else {
           $publishArgs += "-personalAccessToken", $env:TOKEN
         }
-        
+
         & $vsixPublisher $publishArgs
         $publishExit = $LASTEXITCODE
         Write-Host "::endgroup::"
