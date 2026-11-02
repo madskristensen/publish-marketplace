@@ -14,7 +14,10 @@ inputs:
     required: true
   personal-access-code:
     description: "Personal Access Token with Marketplace (Acquire + Manage) permission"
-    required: true
+    required: false
+  oidc:
+    description: "Use OIDC token for trusted publishing (alternative to personal-access-code)"
+    required: false
 
 runs:
   using: "composite"
@@ -25,6 +28,7 @@ runs:
         VSIX_FILE: ${{ inputs.extension-file }}
         MANIFEST_FILE: ${{ inputs.publish-manifest-file }}
         TOKEN: ${{ inputs.personal-access-code }}
+        USE_OIDC: ${{ inputs.oidc }}
       run: |
         $ErrorActionPreference = 'Stop'
 
@@ -40,6 +44,17 @@ runs:
         }
         if (-not (Test-Path -LiteralPath $env:MANIFEST_FILE -PathType Leaf)) {
           Write-Host "::error::publish-manifest-file not found: $env:MANIFEST_FILE"
+          exit 1
+        }
+
+        # Validate that either a PAT or OIDC is provided
+        $useOidc = ($env:USE_OIDC -eq 'true' -or $env:USE_OIDC -eq 'True')
+        if (-not $env:TOKEN -and -not $useOidc) {
+          Write-Host "::error::Either personal-access-code or oidc must be provided"
+          exit 1
+        }
+        if ($env:TOKEN -and $useOidc) {
+          Write-Host "::error::Cannot use both personal-access-code and oidc. Use one or the other."
           exit 1
         }
 
@@ -112,10 +127,19 @@ runs:
         }
 
         Write-Host "::group::VsixPublisher publish"
-        & $vsixPublisher publish `
-          -payload $vsixFull `
-          -publishManifest $manifestFull `
-          -personalAccessToken $env:TOKEN
+        $publishArgs = @(
+          "publish",
+          "-payload", $vsixFull,
+          "-publishManifest", $manifestFull
+        )
+        
+        if ($useOidc) {
+          $publishArgs += "-oidc"
+        } else {
+          $publishArgs += "-personalAccessToken", $env:TOKEN
+        }
+        
+        & $vsixPublisher $publishArgs
         $publishExit = $LASTEXITCODE
         Write-Host "::endgroup::"
 
