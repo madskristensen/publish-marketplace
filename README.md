@@ -23,9 +23,36 @@ On a successful publish the action writes a summary card to the workflow run wit
 |-------|-------------|
 | `extension-file` | Path to the `.vsix` file to publish |
 | `publish-manifest-file` | Path to the `publishManifest.json` file |
-| `personal-access-code` | Personal Access Token with Marketplace (Acquire + Manage) permission |
+| `personal-access-code` | Personal Access Token with Marketplace (Acquire + Manage) permission. **Optional** if using `oidc`. |
+| `oidc` | Use OIDC token for trusted publishing (alternative to `personal-access-code`). Set to `true` to enable. |
+
+### Authentication
+
+**Option 1: Personal Access Token (PAT)**
 
 Store your PAT as a secret named `VS_PUBLISHER_ACCESS_TOKEN`. The token must have **Marketplace → Acquire + Manage** permissions with **All accessible organizations** scope.
+
+```yaml
+- name: Publish to VS Marketplace
+  uses: madskristensen/publish-marketplace@v2
+  with:
+    extension-file: MyExtension.vsix
+    publish-manifest-file: vs-publish.json
+    personal-access-code: ${{ secrets.VS_PUBLISHER_ACCESS_TOKEN }}
+```
+
+**Option 2: OIDC (Trusted Publishing)**
+
+For trusted publishing without a PAT, use OIDC authentication. Set `oidc: true` and ensure your repository has OIDC configured for the Visual Studio Marketplace.
+
+```yaml
+- name: Publish to VS Marketplace
+  uses: madskristensen/publish-marketplace@v2
+  with:
+    extension-file: MyExtension.vsix
+    publish-manifest-file: vs-publish.json
+    oidc: true
+```
 
 ## Example workflow
 
