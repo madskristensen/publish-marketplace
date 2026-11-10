@@ -6,6 +6,8 @@ Requires a **Windows** runner. The action downloads the latest `Microsoft.VSSDK.
 
 On a successful publish the action writes a summary card to the workflow run with the extension name, version, and a link to the Marketplace listing.
 
+The action aligns the downloaded publisher's MSAL binding redirect with its bundled `Microsoft.Identity.Client.dll`. This handles BuildTools packages that reference an older MSAL version than they ship, avoiding `VsixPub0031` assembly-version errors for both PAT and OIDC authentication. Other publisher configuration is preserved.
+
 ## Usage
 
 ```yaml
@@ -80,7 +82,7 @@ Keep your existing PAT secret until the first OIDC publish succeeds, but do not 
 
 See Microsoft's [Trusted Publishing announcement](https://developer.microsoft.com/blog/trusted-publishing-visual-studio-marketplace/) and [GitHub Actions publishing guide](https://learn.microsoft.com/visualstudio/extensibility/walkthrough-publishing-a-visual-studio-extension-via-command-line#publish-from-github-actions-with-trusted-publishing) for details. This action supports Visual Studio IDE extensions on GitHub Actions, not VS Code extensions or Azure Pipelines.
 
-Use `@v2` for automatic updates within v2, or `@v2.2.0` to pin this release. The action always downloads the latest BuildTools package, even when the action itself is pinned.
+Use `@v2` for automatic updates within v2, or `@v2.2.1` to pin this release. The action always downloads the latest BuildTools package, even when the action itself is pinned.
 
 ## Example workflow
 

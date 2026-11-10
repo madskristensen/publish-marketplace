@@ -90,6 +90,36 @@ runs:
           Write-Host "::error::VsixPublisher.exe not found in Microsoft.VSSDK.BuildTools package"
           exit 1
         }
+        # BuildTools can bundle a newer MSAL than the publisher references.
+        $msalPath = Join-Path (Split-Path $vsixPublisher -Parent) 'lib\Microsoft.Identity.Client.dll'
+        if (Test-Path -LiteralPath $msalPath) {
+          $msalVersion = [System.Reflection.AssemblyName]::GetAssemblyName($msalPath).Version.ToString()
+          $configPath = "$vsixPublisher.config"
+          $config = [xml](Get-Content -LiteralPath $configPath -Raw)
+          $namespace = 'urn:schemas-microsoft-com:asm.v1'
+          $namespaces = [System.Xml.XmlNamespaceManager]::new($config.NameTable)
+          $namespaces.AddNamespace('asm', $namespace)
+          $binding = $config.SelectSingleNode('/configuration/runtime/asm:assemblyBinding', $namespaces)
+          $dependency = $config.SelectSingleNode("/configuration/runtime/asm:assemblyBinding/asm:dependentAssembly[asm:assemblyIdentity/@name='Microsoft.Identity.Client']", $namespaces)
+          if (-not $dependency) {
+            $dependency = $config.CreateElement('dependentAssembly', $namespace)
+            $identity = $config.CreateElement('assemblyIdentity', $namespace)
+            $identity.SetAttribute('name', 'Microsoft.Identity.Client')
+            $identity.SetAttribute('publicKeyToken', '0a613f4dd989e8ae')
+            $identity.SetAttribute('culture', 'neutral')
+            [void]$dependency.AppendChild($identity)
+            [void]$binding.AppendChild($dependency)
+          }
+          $redirect = $dependency.SelectSingleNode('asm:bindingRedirect', $namespaces)
+          if (-not $redirect) {
+            $redirect = $config.CreateElement('bindingRedirect', $namespace)
+            [void]$dependency.AppendChild($redirect)
+          }
+          $redirect.SetAttribute('oldVersion', "0.0.0.0-$msalVersion")
+          $redirect.SetAttribute('newVersion', $msalVersion)
+          $config.Save($configPath)
+          Write-Host "Configured Microsoft.Identity.Client binding redirect to $msalVersion"
+        }
         if ($useOidc) {
           $publisherHelp = (& $vsixPublisher publish -help 2>&1 | Out-String)
           if ($publisherHelp -notmatch '(?m)^\s+-oidc\s') {
