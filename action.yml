@@ -120,13 +120,6 @@ runs:
           $config.Save($configPath)
           Write-Host "Configured Microsoft.Identity.Client binding redirect to $msalVersion"
         }
-        if ($useOidc) {
-          $publisherHelp = (& $vsixPublisher publish -help 2>&1 | Out-String)
-          if ($publisherHelp -notmatch '(?m)^\s+-oidc\s') {
-            Write-Host "::error::The downloaded VsixPublisher.exe does not support OIDC. Microsoft.VSSDK.BuildTools 18.12.465 or another OIDC-capable version must be available on nuget.org. Retry after it is published, or use personal-access-code without oidc."
-            exit 1
-          }
-        }
 
         # Resolve the Marketplace itemName from publishManifest.json. The
         # publisher ID and the extension's internal name are what compose
@@ -143,6 +136,10 @@ runs:
           $publisher = $manifestJson.publisher
           if ($manifestJson.identity) { $internalName = $manifestJson.identity.internalName }
         } catch {
+          if ($useOidc) {
+            Write-Host "::error::Could not parse publishManifest.json for trusted publishing."
+            exit 1
+          }
           Write-Host "::warning::Could not parse publishManifest.json: $($_.Exception.Message)"
         }
 
@@ -168,17 +165,57 @@ runs:
           Write-Host "::warning::Could not parse extension.vsixmanifest from VSIX: $($_.Exception.Message)"
         }
 
+        $publishToken = $env:TOKEN
+        if ($useOidc) {
+          if ($publisher -isnot [string] -or [string]::IsNullOrWhiteSpace($publisher)) {
+            Write-Host "::error::Trusted publishing requires a publisher identifier in publishManifest.json."
+            exit 1
+          }
+
+          try {
+            $oidcUri = [System.UriBuilder]::new($env:ACTIONS_ID_TOKEN_REQUEST_URL)
+            $query = @($oidcUri.Query.TrimStart('?') -split '&' | Where-Object { $_ -and $_ -notmatch '^audience=' })
+            $oidcUri.Query = ($query + 'audience=marketplace.visualstudio.com') -join '&'
+            $oidc = Invoke-RestMethod -Method Get -Uri $oidcUri.Uri.AbsoluteUri -Headers @{
+              Authorization = "Bearer $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN"
+              Accept = 'application/json'
+            }
+          } catch {
+            Write-Host "::error::Failed to request a GitHub OIDC token. Verify id-token: write permission."
+            exit 1
+          }
+          if ($oidc.value -isnot [string] -or [string]::IsNullOrWhiteSpace($oidc.value)) {
+            Write-Host "::error::GitHub OIDC token request returned no valid token."
+            exit 1
+          }
+          Write-Host "::add-mask::$($oidc.value)"
+
+          # VsixPublisher's native -oidc exchange omits the required API version.
+          try {
+            $exchange = Invoke-RestMethod -Method Post -Uri 'https://marketplace.visualstudio.com/_apis/gallery/token?api-version=7.2-preview.1' -Headers @{
+              Authorization = "FederatedToken $($oidc.value)"
+              Accept = 'application/json'
+              'X-Market-CI-Provider' = 'github-actions'
+            } -ContentType 'application/json' -Body (@{ publisherName = $publisher } | ConvertTo-Json -Compress)
+          } catch {
+            Write-Host "::error::Marketplace OIDC token exchange failed. Verify the trusted publishing policy and publisher identifier."
+            exit 1
+          }
+          if ($exchange.credential -isnot [string] -or [string]::IsNullOrWhiteSpace($exchange.credential)) {
+            Write-Host "::error::Marketplace OIDC token exchange returned no valid credential."
+            exit 1
+          }
+          $publishToken = $exchange.credential
+          Write-Host "::add-mask::$publishToken"
+        }
+
         Write-Host "::group::VsixPublisher publish"
         $publishArgs = @(
           "publish",
           "-payload", $vsixFull,
-          "-publishManifest", $manifestFull
+          "-publishManifest", $manifestFull,
+          "-personalAccessToken", $publishToken
         )
-        if ($useOidc) {
-          $publishArgs += "-oidc"
-        } else {
-          $publishArgs += "-personalAccessToken", $env:TOKEN
-        }
 
         & $vsixPublisher $publishArgs
         $publishExit = $LASTEXITCODE

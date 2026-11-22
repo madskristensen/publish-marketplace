@@ -47,7 +47,9 @@ Store your PAT as a secret named `VS_PUBLISHER_ACCESS_TOKEN`. The token must hav
 
 For trusted publishing without a stored PAT:
 
-> OIDC requires a `VsixPublisher.exe` with `-oidc` support, verified in `Microsoft.VSSDK.BuildTools` **18.12.465**. At the time of this release, that package is awaiting publication on nuget.org, expected **November 10, 2026**. Until an OIDC-capable package is published there, use PAT authentication. The action downloads the latest stable package on every run, so no workflow change is needed once it becomes available.
+The action performs the GitHub OIDC exchange itself using the Marketplace's versioned API. This avoids the native `VsixPublisher.exe -oidc` token-exchange bug (`VsixPub0047`: missing `api-version`) reported in [microsoft/vsmarketplace#2310](https://github.com/microsoft/vsmarketplace/issues/2310).
+
+Removal of this workaround is tracked in [madskristensen/publish-marketplace#3](https://github.com/madskristensen/publish-marketplace/issues/3). It will remain until a fixed publisher is available on NuGet and native OIDC publishing has been verified end to end.
 
 1. Open your publisher in [Marketplace publisher management](https://marketplace.visualstudio.com/manage) and create a **Trusted Publishing** policy. Specify the exact repository owner, repository name, and workflow filename (for example, `publish.yml`). If the publishing job uses a GitHub environment, specify that exact environment name in the policy too; otherwise leave it empty.
 2. Ensure the `publisher` property in your publish manifest matches the Marketplace publisher that owns the policy.
@@ -76,13 +78,13 @@ jobs:
           oidc: true
 ```
 
-The action passes `-oidc` to `VsixPublisher.exe`, which requests a GitHub OIDC token for audience `marketplace.visualstudio.com` and exchanges it for a Marketplace credential valid for 15 minutes. No separate login or PAT is required. Authentication failures stop publishing; there is no fallback to a stored PAT.
+The action requests a GitHub OIDC token for audience `marketplace.visualstudio.com`, then exchanges it at `https://marketplace.visualstudio.com/_apis/gallery/token?api-version=7.2-preview.1` using the publish manifest's publisher identifier. Both the OIDC token and returned Marketplace credential are masked. The credential is valid for 15 minutes and is passed to `VsixPublisher.exe` through its `-personalAccessToken` argument; it is not a stored PAT. No separate login is required. Authentication failures stop publishing; there is no fallback to a stored PAT.
 
 Keep your existing PAT secret until the first OIDC publish succeeds, but do not pass it to the OIDC publishing step. After verification, remove the unused secret.
 
 See Microsoft's [Trusted Publishing announcement](https://developer.microsoft.com/blog/trusted-publishing-visual-studio-marketplace/) and [GitHub Actions publishing guide](https://learn.microsoft.com/visualstudio/extensibility/walkthrough-publishing-a-visual-studio-extension-via-command-line#publish-from-github-actions-with-trusted-publishing) for details. This action supports Visual Studio IDE extensions on GitHub Actions, not VS Code extensions or Azure Pipelines.
 
-Use `@v2` for automatic updates within v2, or `@v2.2.1` to pin this release. The action always downloads the latest BuildTools package, even when the action itself is pinned.
+Use `@v2` for automatic updates within v2, or `@v2.2.2` to pin this release. The action always downloads the latest BuildTools package, even when the action itself is pinned.
 
 ## Example workflow
 
